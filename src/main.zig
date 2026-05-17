@@ -45,6 +45,26 @@ const CountryCodeRecord = struct {
 const area_code_csv = @embedFile("area_codes.csv");
 const country_code_csv = @embedFile("country_codes.csv");
 
+const usage =
+	\\acode - quickly look up North American area codes or international country calling codes.
+	\\
+	\\Usage: acode [-c] <code>
+	\\
+	\\Arguments:
+	\\  <code> The code to look up (digits only, leading + is ignored)
+	\\
+	\\Flags:
+	\\  -c Look up a country calling code instead of an area code
+	\\  -h, --help Show this help and exit
+	\\
+	\\Examples:
+	\\  acode 303 Look up area code 303 (Colorado)
+	\\  acode -c 44 Look up country code +44 (United Kingdom)
+	\\  acode 44 -c Same as above; -c can appear before or after the code
+	\\  acode -c +1 Leading + is accepted
+	\\
+;
+
 /// Helper function to format a semicolon-separated list of locations into a grammatically correct natural English sentence with Oxford commas.
 fn printGrammarizedLocations(location_str: []const u8) void {
 	var count_iter = std.mem.splitSequence(u8, location_str, "; ");
@@ -94,12 +114,15 @@ pub fn main(init: std.process.Init) !void {
 	while (args.next()) |arg| {
 		if (std.mem.eql(u8, arg, "-c")) {
 			country_mode = true;
+		} else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
+			std.debug.print("{s}", .{usage});
+			return;
 		} else if (input == null) {
 			input = arg;
 		}
 	}
 	const code = input orelse {
-		std.debug.print("Usage: acode [-c] <code>\n", .{});
+		std.debug.print("{s}", .{usage});
 		std.process.exit(1);
 	};
 	const query = if (code.len > 0 and code[0] == '+') code[1..] else code;
