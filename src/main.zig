@@ -54,52 +54,29 @@ const usage =
 	\\  <code> The code to look up (digits only, leading + is ignored)
 	\\
 	\\Flags:
-	\\  -c Look up a country calling code instead of an area code
+	\\  -c, --country Look up a country calling code instead of an area code
 	\\  -h, --help Show this help and exit
 	\\
 	\\Examples:
 	\\  acode 303 Look up area code 303 (Colorado)
-	\\  acode -c 44 Look up country code +44 (United Kingdom)
-	\\  acode 44 -c Same as above; -c can appear before or after the code
+	\\  acode --country 44 Look up country code +44 (United Kingdom)
+	\\  acode 44 -c Same as above; flag can appear before or after the code
 	\\  acode -c +1 Leading + is accepted
 	\\
 ;
 
-/// Helper function to format a semicolon-separated list of locations into a grammatically correct natural English sentence with Oxford commas.
-fn printGrammarizedLocations(location_str: []const u8) void {
-	var count_iter = std.mem.splitSequence(u8, location_str, "; ");
-	var total_cities: usize = 0;
-	while (count_iter.next()) |_| total_cities += 1;
-	var city_iter = std.mem.splitSequence(u8, location_str, "; ");
-	var current_index: usize = 0;
-	while (city_iter.next()) |city| {
-		current_index += 1;
-		std.debug.print("{s}", .{city});
-		if (current_index == total_cities) {
-			std.debug.print(".\n", .{});
-		} else if (total_cities == 2 and current_index == 1) {
-			std.debug.print(" and ", .{});
-		} else if (current_index == total_cities - 1) {
-			std.debug.print(", and ", .{});
+fn printGrammarized(w: *std.Io.Writer, items: []const []const u8) !void {
+	const total = items.len;
+	for (items, 0..) |item, i| {
+		try w.writeAll(item);
+		if (i + 1 == total) {
+			try w.writeAll(".\n");
+		} else if (total == 2 and i == 0) {
+			try w.writeAll(" and ");
+		} else if (i + 1 == total - 1) {
+			try w.writeAll(", and ");
 		} else {
-			std.debug.print(", ", .{});
-		}
-	}
-}
-
-fn printGrammarizedCountries(countries: []const []const u8) void {
-	const total = countries.len;
-	for (countries, 0..) |country, i| {
-		const current_index = i + 1;
-		std.debug.print("{s}", .{country});
-		if (current_index == total) {
-			std.debug.print(".\n", .{});
-		} else if (total == 2 and current_index == 1) {
-			std.debug.print(" and ", .{});
-		} else if (current_index == total - 1) {
-			std.debug.print(", and ", .{});
-		} else {
-			std.debug.print(", ", .{});
+			try w.writeAll(", ");
 		}
 	}
 }
@@ -112,7 +89,7 @@ pub fn main(init: std.process.Init) !void {
 	var country_mode = false;
 	var input: ?[]const u8 = null;
 	while (args.next()) |arg| {
-		if (std.mem.eql(u8, arg, "-c")) {
+		if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--country")) {
 			country_mode = true;
 		} else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
 			std.debug.print("{s}", .{usage});
@@ -126,6 +103,9 @@ pub fn main(init: std.process.Init) !void {
 		std.process.exit(1);
 	};
 	const query = if (code.len > 0 and code[0] == '+') code[1..] else code;
+	var stdout_buf: [4096]u8 = undefined;
+	var stdout_fw = std.Io.File.stdout().writer(init.io, &stdout_buf);
+	const stdout = &stdout_fw.interface;
 	if (country_mode) {
 		var parser = CsvParser.init(country_code_csv);
 		var matches: std.ArrayList([]const u8) = .empty;
@@ -143,8 +123,9 @@ pub fn main(init: std.process.Init) !void {
 		if (matches.items.len == 0) {
 			std.debug.print("Country code '+{s}' not found.\n", .{query});
 		} else {
-			std.debug.print("Country code +{s} is used by: ", .{query});
-			printGrammarizedCountries(matches.items);
+			try stdout.print("Country code +{s} is used by: ", .{query});
+			try printGrammarized(stdout, matches.items);
+			try stdout_fw.flush();
 		}
 	} else {
 		var parser = CsvParser.init(area_code_csv);
@@ -157,8 +138,13 @@ pub fn main(init: std.process.Init) !void {
 				.location = row.nextCell() orelse continue,
 			};
 			if (std.mem.eql(u8, record.code, query)) {
-				std.debug.print("The {s} area code is used in the following parts of {s}:\n", .{ record.code, record.state });
-				printGrammarizedLocations(record.location);
+				var cities: std.ArrayList([]const u8) = .empty;
+				defer cities.deinit(allocator);
+				var loc_iter = std.mem.splitSequence(u8, record.location, "; ");
+				while (loc_iter.next()) |city| try cities.append(allocator, city);
+				try stdout.print("The {s} area code is used in the following parts of {s}:\n", .{ record.code, record.state });
+				try printGrammarized(stdout, cities.items);
+				try stdout_fw.flush();
 				found = true;
 				break;
 			}
