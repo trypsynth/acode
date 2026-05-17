@@ -37,7 +37,13 @@ const AreaCodeRecord = struct {
 	location: []const u8,
 };
 
+const CountryCodeRecord = struct {
+	code: []const u8,
+	country: []const u8,
+};
+
 const area_code_csv = @embedFile("area_codes.csv");
+const country_code_csv = @embedFile("country_codes.csv");
 
 /// Helper function to format a semicolon-separated list of locations into a grammatically correct natural English sentence with Oxford commas.
 fn printGrammarizedLocations(location_str: []const u8) void {
@@ -61,30 +67,79 @@ fn printGrammarizedLocations(location_str: []const u8) void {
 	}
 }
 
+fn printGrammarizedCountries(countries: []const []const u8) void {
+	const total = countries.len;
+	for (countries, 0..) |country, i| {
+		const current_index = i + 1;
+		std.debug.print("{s}", .{country});
+		if (current_index == total) {
+			std.debug.print(".\n", .{});
+		} else if (total == 2 and current_index == 1) {
+			std.debug.print(" and ", .{});
+		} else if (current_index == total - 1) {
+			std.debug.print(", and ", .{});
+		} else {
+			std.debug.print(", ", .{});
+		}
+	}
+}
+
 pub fn main(init: std.process.Init) !void {
 	const allocator = init.gpa;
 	var args = try init.minimal.args.iterateAllocator(allocator);
 	defer args.deinit();
 	if (!args.skip()) return error.MissingProgramName;
-	const input = args.next() orelse {
-		std.debug.print("Usage: acode <area-code>\n", .{});
-		std.process.exit(1);
-	};
-	var parser = CsvParser.init(area_code_csv);
-	var found = false;
-	while (parser.nextRow()) |captured_row| {
-		var row = captured_row;
-		const record = AreaCodeRecord{
-			.code = row.nextCell() orelse continue,
-			.state = row.nextCell() orelse continue,
-			.location = row.nextCell() orelse continue,
-		};
-		if (std.mem.eql(u8, record.code, input)) {
-			std.debug.print("The {s} area code is used in the following parts of {s}:\n", .{ record.code, record.state });
-			printGrammarizedLocations(record.location);
-			found = true;
-			break;
+	var country_mode = false;
+	var input: ?[]const u8 = null;
+	while (args.next()) |arg| {
+		if (std.mem.eql(u8, arg, "-c")) {
+			country_mode = true;
+		} else if (input == null) {
+			input = arg;
 		}
 	}
-	if (!found) std.debug.print("Area code '{s}' not found.\n", .{input});
+	const code = input orelse {
+		std.debug.print("Usage: acode [-c] <code>\n", .{});
+		std.process.exit(1);
+	};
+	const query = if (code.len > 0 and code[0] == '+') code[1..] else code;
+	if (country_mode) {
+		var parser = CsvParser.init(country_code_csv);
+		var matches: std.ArrayList([]const u8) = .empty;
+		defer matches.deinit(allocator);
+		while (parser.nextRow()) |captured_row| {
+			var row = captured_row;
+			const record = CountryCodeRecord{
+				.code = row.nextCell() orelse continue,
+				.country = row.nextCell() orelse continue,
+			};
+			if (std.mem.eql(u8, record.code, query)) {
+				try matches.append(allocator, record.country);
+			}
+		}
+		if (matches.items.len == 0) {
+			std.debug.print("Country code '+{s}' not found.\n", .{query});
+		} else {
+			std.debug.print("Country code +{s} is used by: ", .{query});
+			printGrammarizedCountries(matches.items);
+		}
+	} else {
+		var parser = CsvParser.init(area_code_csv);
+		var found = false;
+		while (parser.nextRow()) |captured_row| {
+			var row = captured_row;
+			const record = AreaCodeRecord{
+				.code = row.nextCell() orelse continue,
+				.state = row.nextCell() orelse continue,
+				.location = row.nextCell() orelse continue,
+			};
+			if (std.mem.eql(u8, record.code, query)) {
+				std.debug.print("The {s} area code is used in the following parts of {s}:\n", .{ record.code, record.state });
+				printGrammarizedLocations(record.location);
+				found = true;
+				break;
+			}
+		}
+		if (!found) std.debug.print("Area code '{s}' not found.\n", .{query});
+	}
 }
