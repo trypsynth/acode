@@ -1,0 +1,52 @@
+name: Release
+on:
+  push:
+    tags:
+      - 'v*'
+jobs:
+  build:
+    strategy:
+      matrix:
+        target:
+          - x86_64-linux-musl
+          - aarch64-linux-musl
+          - x86_64-windows-gnu
+          - aarch64-windows-gnu
+          - x86_64-macos
+          - aarch64-macos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: goto-bus-stop/setup-zig@v2
+        with:
+          zig-version: master
+      - name: Build
+        run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSmall
+      - name: Rename binary
+        run: |
+          if [[ "${{ matrix.target }}" == *"windows"* ]]; then
+            mv zig-out/bin/acode.exe acode-${{ matrix.target }}.exe
+          else
+            mv zig-out/bin/acode acode-${{ matrix.target }}
+          fi
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: acode-${{ matrix.target }}
+          path: acode-${{ matrix.target }}*
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
